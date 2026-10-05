@@ -14,6 +14,7 @@ async function post(url, data, cookie = "") {
           "Content-Type": "application/json",
           "Content-Length": Buffer.byteLength(body),
           Cookie: cookie,
+          Origin: "http://localhost:3000",
         },
       },
       (res) => {
@@ -26,8 +27,9 @@ async function post(url, data, cookie = "") {
           } catch {
             parsed = respData;
           }
-          const setCookie = res.headers["set-cookie"];
-          resolve({ status: res.statusCode, data: parsed, cookies: setCookie });
+          const rawCookies = res.headers["set-cookie"] || [];
+          const cookieHeader = rawCookies.map((c) => c.split(";")[0]).join("; ");
+          resolve({ status: res.statusCode, data: parsed, cookies: cookieHeader });
         });
       }
     );
@@ -46,7 +48,10 @@ async function get(url, cookie = "") {
         port: u.port,
         path: u.pathname + u.search,
         method: "GET",
-        headers: { Cookie: cookie },
+        headers: {
+          Cookie: cookie,
+          Origin: "http://localhost:3000",
+        },
       },
       (res) => {
         let respData = "";
@@ -76,18 +81,22 @@ async function runEndToEndScenario() {
     email: "citizen@civicos.org",
     password: "password123",
   });
-  if (citizenLogin.status !== 200) throw new Error("Citizen login failed");
-  const citizenCookie = citizenLogin.cookies ? citizenLogin.cookies[0].split(";")[0] : "";
+  if (citizenLogin.status !== 200) throw new Error("Citizen login failed: " + JSON.stringify(citizenLogin.data));
+  const citizenCookie = citizenLogin.cookies;
   console.log("✓ Citizen logged in:", citizenLogin.data.user.name, `(${citizenLogin.data.user.role})`);
 
   // 2. AI Diagnostic Analysis
   console.log("\n2. Testing AI Diagnostic Analysis & Duplicate Check...");
-  const aiAnalysis = await post("http://localhost:3000/api/ai/analyze", {
-    description: "Deep dangerous crater pothole right outside school gate. Cars swerving into pedestrians.",
-    coordinates: { latitude: 40.7135, longitude: -74.0055 },
-    category: "Roads",
-  });
-  if (aiAnalysis.status !== 200) throw new Error("AI analysis failed");
+  const aiAnalysis = await post(
+    "http://localhost:3000/api/ai/analyze",
+    {
+      description: "Deep dangerous crater pothole right outside school gate. Cars swerving into pedestrians.",
+      coordinates: { latitude: 40.7135, longitude: -74.0055 },
+      category: "Roads",
+    },
+    citizenCookie
+  );
+  if (aiAnalysis.status !== 200) throw new Error("AI analysis failed: " + JSON.stringify(aiAnalysis.data));
   console.log("✓ AI Analysis Output:", {
     problem: aiAnalysis.data.analysis.detectedProblem,
     severity: aiAnalysis.data.analysis.severityScore,
@@ -103,6 +112,7 @@ async function runEndToEndScenario() {
     {
       title: "Severe Pothole on School Crossing",
       description: "Deep dangerous crater pothole right outside school gate. Cars swerving into pedestrians.",
+      categoryId: "cat_roads",
       latitude: 40.7135,
       longitude: -74.0055,
       address: "142 Elm St, Sector 4, Metro District",
@@ -119,13 +129,13 @@ async function runEndToEndScenario() {
 
   // 4. Verify Incident Detail, Priority Breakdown, and SLA
   console.log("\n4. Verifying Incident Dossier, Priority Score, and SLA...");
-  const incDetail = await get(`http://localhost:3000/api/incidents/${newCaseId}`);
-  if (incDetail.status !== 200) throw new Error("Fetch incident detail failed");
+  const incDetail = await get(`http://localhost:3000/api/incidents/${newCaseId}`, citizenCookie);
+  if (incDetail.status !== 200) throw new Error("Fetch incident detail failed: " + JSON.stringify(incDetail.data));
   const incData = incDetail.data.incident;
   console.log("✓ Incident Status:", incData.status);
   console.log("✓ Priority Score:", `${incData.priorityScore}/100 (${incData.priorityLabel})`);
   console.log("✓ SLA Deadline:", incData.slaDeadline, `(Status: ${incData.slaStatus})`);
-  console.log("✓ Priority Breakdown:", incData.priorityBreakdown?.totalScore);
+  console.log("✓ Priority Breakdown Total:", incData.priorityBreakdown?.totalScore);
 
   // 5. Moderator Login & Approval
   console.log("\n5. Testing Moderator Review & Verification...");
@@ -133,13 +143,14 @@ async function runEndToEndScenario() {
     email: "moderator@civicos.org",
     password: "password123",
   });
-  const modCookie = modLogin.cookies ? modLogin.cookies[0].split(";")[0] : "";
+  if (modLogin.status !== 200) throw new Error("Moderator login failed: " + JSON.stringify(modLogin.data));
+  const modCookie = modLogin.cookies;
   const modApprove = await post(
     "http://localhost:3000/api/moderation/action",
     { action: "APPROVE", incidentId: newIncidentId, reason: "Confirmed severe road defect on school transit route." },
     modCookie
   );
-  if (modApprove.status !== 200) throw new Error("Moderator approve failed");
+  if (modApprove.status !== 200) throw new Error("Moderator approve failed: " + JSON.stringify(modApprove.data));
   console.log("✓ Moderator approved incident. Status is now VERIFIED.");
 
   // 6. Authority Login & Field Team Assignment
@@ -148,9 +159,11 @@ async function runEndToEndScenario() {
     email: "authority@civicos.org",
     password: "password123",
   });
-  const authCookie = authLogin.cookies ? authLogin.cookies[0].split(";")[0] : "";
-  const deptsRes = await get("http://localhost:3000/api/departments");
-  const roadDept = deptsRes.data.departments.find((d) => d.code === "ROADS");
+  if (authLogin.status !== 200) throw new Error("Authority login failed: " + JSON.stringify(authLogin.data));
+  const authCookie = authLogin.cookies;
+
+  const deptsRes = await get("http://localhost:3000/api/departments", authCookie);
+  const roadDept = deptsRes.data.departments.find((d) => d.code === "ROADS") || deptsRes.data.departments[0];
   const teamId = roadDept.teams[0].id;
 
   const assignRes = await post(
@@ -188,10 +201,8 @@ async function runEndToEndScenario() {
 
   // 9. Opposite Flow Test: Citizen Rejection & Reopening
   console.log("\n9. Testing Opposite Scenario: Resolution Rejection & Automatic Reopening...");
-  // Set back to VERIFICATION_PENDING
-  await post(`http://localhost:3000/api/incidents/${newIncidentId}/status`, { toStatus: "VERIFICATION_PENDING" }, authCookie);
-  
-  // Citizen clicks NOT FIXED
+  await post(`http://localhost:3000/api/incidents/${newIncidentId}/status`, { toStatus: "VERIFICATION_PENDING", reason: "Re-evaluating site condition" }, authCookie);
+
   const citizenReject = await post(
     `http://localhost:3000/api/incidents/${newIncidentId}/verify`,
     {
@@ -205,19 +216,30 @@ async function runEndToEndScenario() {
   if (citizenReject.status !== 200) throw new Error("Rejection failed: " + JSON.stringify(citizenReject.data));
   console.log("✓ Citizen Rejected Resolution. Incident reopened! Status:", citizenReject.data.status);
 
-  // 10. Verify Relational Graph & Audit Logging
+  // 10. Verify Relational Graph & Audit Logging (Admin Auth)
   console.log("\n10. Verifying Relational Graph Nodes & Immutable Audit Trail...");
-  const graphRes = await get(`http://localhost:3000/api/incidents/${newIncidentId}/graph`);
+  const graphRes = await get(`http://localhost:3000/api/incidents/${newIncidentId}/graph`, citizenCookie);
   console.log(`✓ Graph Generated: ${graphRes.data.nodes.length} Nodes, ${graphRes.data.edges.length} Edges`);
 
-  const auditRes = await get("http://localhost:3000/api/audit", modCookie);
+  const adminLogin = await post("http://localhost:3000/api/auth/login", {
+    email: "admin@civicos.org",
+    password: "password123",
+  });
+  if (adminLogin.status !== 200) throw new Error("Admin login failed: " + JSON.stringify(adminLogin.data));
+  const adminCookie = adminLogin.cookies;
+
+  const auditRes = await get("http://localhost:3000/api/audit", adminCookie);
   console.log(`✓ Audit Records logged: ${auditRes.data.logs.length} Total events captured`);
 
   // 11. Natural Language Civic Assistant Query
   console.log("\n11. Testing Grounded Natural Language Analytics Assistant...");
-  const aiAskRes = await post("http://localhost:3000/api/ai/ask", {
-    query: "Which department has the highest workload?",
-  });
+  const aiAskRes = await post(
+    "http://localhost:3000/api/ai/ask",
+    {
+      query: "Which department has the highest workload?",
+    },
+    citizenCookie
+  );
   console.log("✓ Civic Assistant Answer:", aiAskRes.data.answer);
 
   console.log("\n=======================================================");
