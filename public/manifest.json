@@ -1,0 +1,17 @@
+{
+  "name": "CivicOS - Municipal Problem Intelligence",
+  "short_name": "CivicOS",
+  "description": "Report problems. Track solutions. Understand your city.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

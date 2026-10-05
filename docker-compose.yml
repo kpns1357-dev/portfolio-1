@@ -1,0 +1,25 @@
+version: "3.8"
+
+services:
+  civicos:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: civicos_app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DATABASE_URL=file:/app/prisma/civicos.db
+      - JWT_SECRET=civicos_prod_super_secure_access_secret_with_32_characters_minimum!
+      - JWT_REFRESH_SECRET=civicos_prod_super_secure_refresh_secret_with_32_characters_minimum!
+      - ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+    volumes:
+      - civicos_db:/app/prisma
+      - civicos_storage:/app/storage
+
+volumes:
+  civicos_db:
+  civicos_storage:

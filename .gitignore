@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+/.pnp
+.pnp.js
+
+# Testing
+/coverage
+
+# Next.js
+/.next/
+/out/
+
+# Production
+/build
+
+# Misc
+.DS_Store
+*.pem
+
+# Local env files
+.env*.local
+.env
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# Storage
+storage/uploads/*
+!storage/uploads/.gitkeep
+
+# Prisma SQLite Database
+prisma/*.db
+prisma/*.db-journal
+
+# ZIP
+*.zip

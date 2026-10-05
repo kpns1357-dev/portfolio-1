@@ -1,0 +1,406 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./civicos.db"
+}
+
+model User {
+  id                     String         @id @default(uuid())
+  email                  String         @unique
+  passwordHash           String
+  name                   String
+  role                   String         @default("CITIZEN") // CITIZEN, MODERATOR, AUTHORITY, SUPER_ADMIN
+  phone                  String?
+  reliabilityScore       Float          @default(1.0)
+  failedLoginAttempts    Int            @default(0)
+  lockedUntil            DateTime?
+  emailVerified          Boolean        @default(true)
+  resetPasswordTokenHash String?
+  resetPasswordExpiresAt DateTime?
+  departmentId           String?
+  teamId                 String?
+  department             Department?    @relation(fields: [departmentId], references: [id])
+  team                   Team?          @relation(fields: [teamId], references: [id])
+  sessions               Session[]
+  reports                Report[]
+  statusUpdates          StatusHistory[]
+  comments               Comment[]
+  notifications          Notification[]
+  verifications          Verification[]
+  auditLogs              AuditLog[]
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+
+  @@index([role])
+  @@index([email])
+}
+
+model Session {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  userAgent String?
+  ip        String?
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Department {
+  id           String     @id @default(uuid())
+  name         String     @unique
+  code         String     @unique
+  description  String
+  contactEmail String?
+  teams        Team[]
+  users        User[]
+  incidents    Incident[]
+  assignments  Assignment[]
+  categories   Category[]
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+}
+
+model Team {
+  id             String       @id @default(uuid())
+  name           String
+  departmentId   String
+  department     Department   @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  leadName       String?
+  contactPhone   String?
+  activeWorkload Int          @default(0)
+  users          User[]
+  incidents      Incident[]
+  assignments    Assignment[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([departmentId])
+}
+
+model Category {
+  id                  String      @id @default(uuid())
+  name                String      @unique
+  slug                String      @unique
+  description         String
+  icon                String?
+  severityBase        Float       @default(5.0)
+  defaultDepartmentId String?
+  defaultDepartment   Department? @relation(fields: [defaultDepartmentId], references: [id])
+  reports             Report[]
+  incidents           Incident[]
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+}
+
+model Report {
+  id              String               @id @default(uuid())
+  trackingCode    String               @unique // e.g. REP-2026-XXXX
+  title           String
+  description     String
+  categoryId      String
+  category        Category             @relation(fields: [categoryId], references: [id])
+  citizenId       String?
+  citizen         User?                @relation(fields: [citizenId], references: [id], onDelete: SetNull)
+  anonymity       String               @default("PUBLIC") // PUBLIC, HIDDEN, ANONYMOUS
+  latitude        Float
+  longitude       Float
+  address         String
+  landmark        String?
+  incidentId      String?
+  incident        Incident?            @relation(fields: [incidentId], references: [id], onDelete: SetNull)
+  moderationFlag  String               @default("CLEAN") // CLEAN, SUSPICIOUS_FREQ, REPEATED_IMAGE, IMPOSSIBLE_LOC, ABUSIVE, SPAM
+  moderationNotes String?
+  evidence        Evidence[]
+  aiAnalysis      AIAnalysis?
+  duplicateLinks  DuplicateCandidate[] @relation("ReportDuplicates")
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  @@index([categoryId])
+  @@index([incidentId])
+  @@index([citizenId])
+  @@index([createdAt])
+}
+
+model Incident {
+  id                 String                     @id @default(uuid())
+  caseId             String                     @unique // e.g. CF-2026-28491
+  title              String
+  description        String
+  categoryId         String
+  category           Category                   @relation(fields: [categoryId], references: [id])
+  status             String                     @default("REPORTED")
+  // REPORTED, UNDER_REVIEW, VERIFIED, ASSIGNED, INSPECTION_PENDING, IN_PROGRESS, REPAIR_COMPLETED, VERIFICATION_PENDING, RESOLVED, REJECTED, REOPENED, ESCALATED
+  priorityScore      Int                        @default(50) // 0-100
+  priorityLabel      String                     @default("MEDIUM") // LOW, MEDIUM, HIGH, CRITICAL
+  departmentId       String?
+  department         Department?                @relation(fields: [departmentId], references: [id])
+  teamId             String?
+  team               Team?                      @relation(fields: [teamId], references: [id])
+  latitude           Float
+  longitude          Float
+  address            String
+  areaName           String                     @default("Downtown")
+  slaDeadline        DateTime
+  slaStatus          String                     @default("NORMAL") // NORMAL, WARNING, BREACHED
+  escalationLevel    Int                        @default(0)
+  recurringClusterId String?
+  recurringCluster   RecurringCluster?          @relation(fields: [recurringClusterId], references: [id])
+  reports            Report[]
+  evidence           Evidence[]
+  assignments        Assignment[]
+  statusHistory      StatusHistory[]
+  comments           Comment[]
+  verifications      Verification[]
+  escalations        Escalation[]
+  priorityBreakdown  PriorityScoreBreakdown?
+  sourceRelations    IncidentRelationship[]     @relation("SourceIncident")
+  targetRelations    IncidentRelationship[]     @relation("TargetIncident")
+  duplicateMatches   DuplicateCandidate[]       @relation("IncidentDuplicates")
+  createdAt          DateTime                   @default(now())
+  updatedAt          DateTime                   @updatedAt
+  resolvedAt         DateTime?
+
+  @@index([status])
+  @@index([priorityScore])
+  @@index([categoryId])
+  @@index([departmentId])
+  @@index([teamId])
+  @@index([slaDeadline])
+  @@index([createdAt])
+}
+
+model Evidence {
+  id           String    @id @default(uuid())
+  reportId     String?
+  report       Report?   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  incidentId   String?
+  incident     Incident? @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  evidenceType String    @default("CITIZEN_SUBMISSION") // CITIZEN_SUBMISSION, INSPECTION, REPAIR, CITIZEN_REJECTION
+  url          String
+  filename     String
+  mimeType     String    @default("image/jpeg")
+  sizeBytes    Int       @default(0)
+  capturedAt   DateTime  @default(now())
+  notes        String?
+  uploaderId   String?
+  createdAt    DateTime  @default(now())
+
+  @@index([reportId])
+  @@index([incidentId])
+  @@index([evidenceType])
+}
+
+model Assignment {
+  id           String      @id @default(uuid())
+  incidentId   String
+  incident     Incident    @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  teamId       String
+  team         Team        @relation(fields: [teamId], references: [id])
+  departmentId String
+  department   Department  @relation(fields: [departmentId], references: [id])
+  assignedById String?
+  notes        String?
+  active       Boolean     @default(true)
+  assignedAt   DateTime    @default(now())
+
+  @@index([incidentId])
+  @@index([teamId])
+}
+
+model StatusHistory {
+  id          String    @id @default(uuid())
+  incidentId  String
+  incident    Incident  @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  fromStatus  String
+  toStatus    String
+  actorId     String?
+  actor       User?     @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  actorName   String    @default("System")
+  actorRole   String    @default("SYSTEM")
+  reason      String?
+  evidenceId  String?
+  createdAt   DateTime  @default(now())
+
+  @@index([incidentId])
+  @@index([createdAt])
+}
+
+model Verification {
+  id                    String    @id @default(uuid())
+  incidentId            String
+  incident              Incident  @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  citizenId             String?
+  citizen               User?     @relation(fields: [citizenId], references: [id], onDelete: SetNull)
+  status                String    @default("PENDING") // PENDING, CONFIRMED, REJECTED
+  rejectionReason       String?   // STILL_EXISTS, PARTIALLY_FIXED, WRONG_LOCATION, NEW_DAMAGE, OTHER
+  citizenNotes          String?
+  aiMatchScore          Float?    // e.g. 0.84
+  visibleChangeDetected Boolean   @default(true)
+  resolutionConfidence  Float?    // 0.84
+  createdAt             DateTime  @default(now())
+  respondedAt           DateTime?
+
+  @@index([incidentId])
+  @@index([citizenId])
+}
+
+model DuplicateCandidate {
+  id                  String    @id @default(uuid())
+  reportId            String
+  report              Report    @relation("ReportDuplicates", fields: [reportId], references: [id], onDelete: Cascade)
+  potentialIncidentId String
+  potentialIncident   Incident  @relation("IncidentDuplicates", fields: [potentialIncidentId], references: [id], onDelete: Cascade)
+  similarityScore     Float     // e.g. 0.94
+  distanceMeters      Float
+  status              String    @default("DETECTED") // DETECTED, MERGED, DISMISSED, SEPARATE
+  detectedAt          DateTime  @default(now())
+
+  @@index([reportId])
+  @@index([potentialIncidentId])
+}
+
+model Escalation {
+  id          String    @id @default(uuid())
+  incidentId  String
+  incident    Incident  @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  level       Int       @default(1)
+  reason      String
+  triggeredAt DateTime  @default(now())
+  resolvedAt  DateTime?
+  notes       String?
+
+  @@index([incidentId])
+}
+
+model AIAnalysis {
+  id                    String   @id @default(uuid())
+  reportId              String   @unique
+  report                Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  detectedProblem       String
+  category              String
+  severityScore         Float    // 0.0 - 10.0 (e.g. 8.7)
+  safetyRisk            String   // LOW, MEDIUM, HIGH, CRITICAL
+  recommendedDepartment String
+  summary               String
+  confidence            Float    // e.g. 0.94
+  isDemo                Boolean  @default(false)
+  rawResponse           String?  // JSON string
+  createdAt             DateTime @default(now())
+}
+
+model PriorityScoreBreakdown {
+  id                    String   @id @default(uuid())
+  incidentId            String   @unique
+  incident              Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  severityScore         Int      @default(0) // +30 max
+  safetyScore           Int      @default(0) // +25 max
+  multipleReportsScore  Int      @default(0) // +12 max
+  trafficScore          Int      @default(0) // +8 max
+  durationScore         Int      @default(0) // +7 max
+  recurrenceScore       Int      @default(0) // +5 max
+  totalScore            Int      @default(50)
+  explanation           String?  // JSON formatted reason map
+  createdAt             DateTime @default(now())
+}
+
+model RecurringCluster {
+  id                   String     @id @default(uuid())
+  title                String
+  areaName             String
+  primaryCategory      String
+  totalIncidents       Int        @default(0)
+  rootCauseHypothesis  String
+  confidenceScore      Float      @default(0.75)
+  centerLat            Float
+  centerLng            Float
+  radiusMeters         Float      @default(500)
+  status               String     @default("ACTIVE") // ACTIVE, INVESTIGATING, MITIGATED
+  incidents            Incident[]
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
+
+  @@index([areaName])
+}
+
+model IncidentRelationship {
+  id               String   @id @default(uuid())
+  sourceIncidentId String
+  sourceIncident   Incident @relation("SourceIncident", fields: [sourceIncidentId], references: [id], onDelete: Cascade)
+  targetIncidentId String
+  targetIncident   Incident @relation("TargetIncident", fields: [targetIncidentId], references: [id], onDelete: Cascade)
+  relationshipType String   // DUPLICATE, SAME_LOCATION, RELATED, RECURRING, CONSEQUENCE
+  confidence       Float    @default(1.0)
+  notes            String?
+  createdAt        DateTime @default(now())
+
+  @@index([sourceIncidentId])
+  @@index([targetIncidentId])
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String
+  type      String   @default("INFO") // INFO, ASSIGNMENT, VERIFICATION_REQUEST, STATUS_CHANGE, SLA_ALERT
+  link      String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([isRead])
+}
+
+model Comment {
+  id         String   @id @default(uuid())
+  incidentId String
+  incident   Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  authorId   String?
+  author     User?    @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  authorName String
+  authorRole String   @default("CITIZEN")
+  content    String
+  isInternal Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([incidentId])
+}
+
+model AuditLog {
+  id            String   @id @default(uuid())
+  actorId       String?
+  actor         User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  actorName     String   @default("System")
+  actorRole     String   @default("SYSTEM")
+  action        String   // REPORT_CREATED, STATUS_CHANGED, ASSIGNED, RESOLVED, VERIFIED, MERGED, etc.
+  entityType    String   // Report, Incident, User, Setting
+  entityId      String
+  previousState String?  // JSON string
+  newState      String?  // JSON string
+  ipAddress     String?
+  userAgent     String?
+  requestId     String?
+  createdAt     DateTime @default(now())
+
+  @@index([actorId])
+  @@index([action])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+model SystemSetting {
+  key         String   @id
+  value       String   // JSON string
+  description String?
+  updatedAt   DateTime @updatedAt
+}
